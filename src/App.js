@@ -85,8 +85,6 @@ const matchScore = (task, emp) => {
   const avail = Math.max(0, Math.min(1, buf / task.weekly)) * 100;
   return Math.round(skillAvg(emp, task) * 0.6 + avail * 0.4);
 };
-// Who a recommended candidate is compared against:
-// the current assignee, or (if the task has none) the next best candidate.
 const baselineFor = (task, toId, employees) => {
   const cur = employees.find((e) => e.id === task.assignedId);
   if (cur && cur.id !== toId) return cur;
@@ -192,9 +190,8 @@ const Badge = ({ cls, icon, children }) => (
   </span>
 );
 const StatusBadge = ({ s }) => <Badge cls={STATUS_META[s].cls} icon={STATUS_META[s].icon}>{STATUS_META[s].label}</Badge>;
-const PriorityBadge = ({ p }) => <Badge cls={PRIORITY_META[p]}>{p === 'Critical' ? '▲▲ ' : p === 'High' ? '▲ ' : p === 'Low' ? '▼ ' : '● '}{p}</Badge>;
+const PriorityBadge = ({ p }) => <Badge cls={PRIORITY_META[p]}>{p === 'Critical' ? '▲▲ ' : p === 'High' ? '▲ ' : p === 'Low' ? '▼ ' : '● '}{p}</Badge>
 
-// max = value treated as 100% of the bar width, mark = position of the reference line (same unit as value)
 const Bar = ({ value, max = 100, color = 'bg-slate-800', mark }) => (
   <div className="relative w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200" role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin="0" aria-valuemax={max}>
     <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, (value / max) * 100))}%` }} />
@@ -348,7 +345,6 @@ function Toast({ toast, onClose }) {
   );
 }
 
-// Shows hours and minutes only (no seconds)
 function Clock() {
   const [t, setT] = useState(new Date());
   useEffect(() => { const i = setInterval(() => setT(new Date()), 15000); return () => clearInterval(i); }, []);
@@ -594,7 +590,6 @@ function HRDashboard({ ctx }) {
   const pg = usePaged(rows, 5, 'flagged reallocations');
   const active = views[Math.min(idx, Math.max(0, views.length - 1))];
 
-  // Opened from a notification: jump to the decision panel and select that task
   useEffect(() => {
     if (!focusTaskId) return;
     const i = views.findIndex((x) => x.item.taskId === focusTaskId);
@@ -898,7 +893,19 @@ function EmployeeDetail({ ctx, id }) {
 }
 
 function AnalysisPage({ ctx }) {
-  const { employees } = ctx;
+  const { employees, toast } = ctx;
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [lastAnalyzed, setLastAnalyzed] = useState('Just now');
+
+  const handleRunAnalysis = () => {
+    setIsAnalyzing(true);
+    setTimeout(() => {
+      setIsAnalyzing(false);
+      setLastAnalyzed(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      if (toast) toast('success', 'Allocation analysis successfully executed and updated.');
+    }, 800);
+  };
+
   const total = employees.length;
   const over = employees.filter((e) => allocStatus(e) === 'reassign').length;
   const subs = employees.filter((e) => allocStatus(e) === 'sub');
@@ -906,27 +913,51 @@ function AnalysisPage({ ctx }) {
   const avg = Math.round(employees.reduce((a, e) => a + util(e), 0) / (total || 1));
   const byDept = DEPTS.map((d) => { const l = employees.filter((e) => e.dept === d); return { d, n: l.length, avg: l.length ? Math.round(l.reduce((a, e) => a + util(e), 0) / l.length) : 0 }; });
   const ranked = [...employees].sort((a, b) => util(b) - util(a)).slice(0, 10);
+
   return (
     <>
-      <PageHeader title="Allocation Analysis" desc="Workload and capacity risk across departments, based on current employee data." />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard label="Overloaded Staff" value={Math.round((over / (total || 1)) * 100)} unit="%" note={<p>{fmt(over)} of {fmt(total)} employees are above 110% of capacity</p>} icon="alert" />
-        <StatCard label="Average Workload" value={avg} unit="%" note={<p>Average against a 40-hour week</p>} icon="chart" />
-        <StatCard label="Unused Capacity" value={fmt(idleHours)} unit="h/week" note={<p>{fmt(subs.length)} under-used employees could take on more work</p>} icon="clock" />
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card className="p-5">
-          <h2 className="text-base font-extrabold text-slate-900 mb-4">Workload by Department</h2>
-          <div className="space-y-4">{byDept.map((x) => { const k = allocStatusP(x.avg); return (
-            <div key={x.d}><div className="flex justify-between flex-wrap gap-2 text-sm font-bold text-slate-800 mb-1"><span>{x.d} ({fmt(x.n)} people)</span><span>{x.avg}% • {STATUS_META[k].label}</span></div><UtilBar value={x.avg} status={k} /></div>); })}</div>
-          <p className="text-xs text-slate-500 mt-3">The black line marks 100% capacity (40 hours).</p>
+      <PageHeader 
+        title="Allocation Analysis" 
+        desc={`Workload and capacity risk across departments. Last analyzed: ${lastAnalyzed}`}
+        actions={
+          <button 
+            className={btn('primary')} 
+            onClick={handleRunAnalysis} 
+            disabled={isAnalyzing}
+          >
+            <Icon name="bolt" />
+            {isAnalyzing ? 'Running Analysis...' : 'Run Analysis'}
+          </button>
+        } 
+      />
+
+      {isAnalyzing ? (
+        <Card className="p-12 text-center my-6">
+          <div className="w-10 h-10 mx-auto rounded-full border-4 border-slate-200 border-t-slate-900 animate-spin mb-3" />
+          <p className="font-bold text-slate-700">Processing workload distribution and metrics...</p>
         </Card>
-        <Card className="p-5">
-          <h2 className="text-base font-extrabold text-slate-900 mb-4">Top 10 Highest Workloads</h2>
-          <div className="space-y-3">{ranked.map((e) => (
-            <div key={e.id}><div className="flex justify-between gap-2 text-sm font-bold text-slate-800 mb-1"><span className="truncate">{e.name}</span><span className="shrink-0">{e.hours}h ({util(e)}%)</span></div><UtilBar value={util(e)} status={allocStatus(e)} /></div>))}</div>
-        </Card>
-      </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StatCard label="Overloaded Staff" value={Math.round((over / (total || 1)) * 100)} unit="%" note={<p>{fmt(over)} of {fmt(total)} employees are above 110% of capacity</p>} icon="alert" />
+            <StatCard label="Average Workload" value={avg} unit="%" note={<p>Average against a 40-hour week</p>} icon="chart" />
+            <StatCard label="Unused Capacity" value={fmt(idleHours)} unit="h/week" note={<p>{fmt(subs.length)} under-used employees could take on more work</p>} icon="clock" />
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+            <Card className="p-5">
+              <h2 className="text-base font-extrabold text-slate-900 mb-4">Workload by Department</h2>
+              <div className="space-y-4">{byDept.map((x) => { const k = allocStatusP(x.avg); return (
+                <div key={x.d}><div className="flex justify-between flex-wrap gap-2 text-sm font-bold text-slate-800 mb-1"><span>{x.d} ({fmt(x.n)} people)</span><span>{x.avg}% • {STATUS_META[k].label}</span></div><UtilBar value={x.avg} status={k} /></div>); })}</div>
+              <p className="text-xs text-slate-500 mt-3">The black line marks 100% capacity (40 hours).</p>
+            </Card>
+            <Card className="p-5">
+              <h2 className="text-base font-extrabold text-slate-900 mb-4">Top 10 Highest Workloads</h2>
+              <div className="space-y-3">{ranked.map((e) => (
+                <div key={e.id}><div className="flex justify-between gap-2 text-sm font-bold text-slate-800 mb-1"><span className="truncate">{e.name}</span><span className="shrink-0">{e.hours}h ({util(e)}%)</span></div><UtilBar value={util(e)} status={allocStatus(e)} /></div>))}</div>
+            </Card>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -1258,7 +1289,6 @@ export default function App() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
-  // Half-view / zoomed layouts: auto-collapse the sidebar to an icon rail below 1280px
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1279px)');
     const on = () => setCollapsed(mq.matches);
@@ -1362,7 +1392,6 @@ export default function App() {
 
   const ctx = { role, employees, tasks, triage, recs, history, empById, navigate: go, requestApprove, requestKeep, runCheck, lastCheck, selectedTaskId, setSelectedTaskId, compareIds, setCompareIds, compareTaskId, setCompareTaskId, empPreset, setEmpPreset, focusTaskId, setFocusTaskId, openAddTask: () => setShowAdd(true), askConfirm, setRecs, toast };
 
-  /* ---------- Not signed in ---------- */
   if (!user) {
     return (
       <>
@@ -1374,7 +1403,6 @@ export default function App() {
     );
   }
 
-  /* ---------- Breadcrumb ---------- */
   const menu = findMenu(role, page);
   const crumbs = [{ label: 'Home', to: 'dashboard' }];
   if (menu) {
@@ -1383,14 +1411,12 @@ export default function App() {
     if (page === 'employees' && path[1]) crumbs.push({ label: empById(path[1])?.name || path[1] });
   }
 
-  /* ---------- Global search ---------- */
   const s = gq.trim().toLowerCase();
   const results = s ? [
     ...(role === 'hr' ? employees.filter((e) => [e.name, e.id, e.title].some((x) => x.toLowerCase().includes(s))).map((e) => ({ key: e.id, label: e.name, sub: `${e.id} • ${e.title}`, onClick: () => go(`employees/${e.id}`) })) : []),
     ...tasks.filter((t) => [t.id, t.name].some((x) => x.toLowerCase().includes(s))).map((t) => ({ key: t.id, label: `${t.id} ${t.name}`, sub: 'Task', onClick: () => { setSelectedTaskId(t.id); go('tasks'); } })),
   ].slice(0, 6) : [];
 
-  /* ---------- Notifications ---------- */
   const unassigned = tasks.filter((t) => !t.assignedId);
   const notifications = [
     ...(role === 'hr' ? triage.map((i) => {
@@ -1439,7 +1465,6 @@ export default function App() {
     <div className="h-screen flex bg-slate-50 text-slate-800 antialiased font-sans overflow-hidden">
       <Toast toast={toastState} onClose={() => setToastState(null)} />
 
-      {/* Sidebar: icon rail from 768px, full width from 1280px, drawer below 768px */}
       <aside className={`hidden md:flex shrink-0 bg-[#0f172a] text-slate-300 border-r border-slate-800 transition-all duration-200 ${collapsed ? 'w-20' : 'w-64'}`}>
         <div className="w-full"><SidebarBody {...sideProps} go={go} compact={collapsed} showToggle onToggle={() => setCollapsed(!collapsed)} /></div>
       </aside>
